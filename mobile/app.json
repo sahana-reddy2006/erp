@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "KinLedger Family ERP",
+    "slug": "kinledger-family-erp",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "scheme": "kinledger",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#047857"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.kinledger.familyerp",
+      "buildNumber": "1"
+    },
+    "android": {
+      "package": "com.kinledger.familyerp",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#047857"
+      },
+      "permissions": [
+        "NOTIFICATIONS"
+      ]
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-notifications"
+    ],
+    "extra": {
+      "apiUrl": "http://localhost:3000"
+    }
+  }
+}
