@@ -46,6 +46,16 @@ NODE_ENV=production npm start
 ```
 Ensure WebSockets (`/ws`) are enabled on your reverse proxy or load balancer (Cloud Run, Render, and Railway support WebSockets out of the box on port `3000`).
 
+### Production Deployment on Vercel (Frontend + Serverless API)
+This repository includes `vercel.json` and `api/index.ts`, which deploys the Vite React frontend (`dist/`) together with the Express API as a Vercel Serverless Function (`/api/*`).
+
+1. **MongoDB Atlas Network Access**: In Atlas -> **Network Access**, add `0.0.0.0/0` so Vercel's dynamic serverless IP addresses can connect.
+2. **Vercel Project Settings -> Environment Variables** (enable for Production, Preview, and Development):
+   - `MONGODB_URI`: Your MongoDB Atlas SRV connection string (`mongodb+srv://<user>:<password>@cluster0.xxxxx.mongodb.net/kinledger_erp?retryWrites=true&w=majority`). **Required** — Vercel has a read-only filesystem, so local JSON fallback is disabled on Vercel.
+   - `JWT_SECRET`: A strong random 32+ character secret for signing and verifying JWT tokens. **Required**.
+   - `VITE_API_URL`: *(Optional)* Leave unset so the web app calls same-origin `/api/*` endpoints directly.
+3. Redeploy on Vercel after saving environment variables, then verify `https://<your-app>.vercel.app/api/health` returns `{"ok":true,"storage":"mongodb","mongoConnected":true}`.
+
 ---
 
 ## 4. Mobile App Setup (`mobile/`)

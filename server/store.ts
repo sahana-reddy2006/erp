@@ -46,33 +46,75 @@ function docToObject<T>(doc: Record<string, unknown>): T {
 class ErpStore {
   private useMongo = false;
   private initialized = false;
+  private initPromise: Promise<{ mode: 'mongodb' | 'local-json' }> | null = null;
   private memoryData: SeedDataset | null = null;
   private persistQueue: Promise<void> = Promise.resolve();
 
+  private isStrictMongoRequired(): boolean {
+    return Boolean(process.env.VERCEL) || process.env.REQUIRE_MONGODB === 'true';
+  }
+
   async init(): Promise<{ mode: 'mongodb' | 'local-json' }> {
     if (this.initialized) {
-      return { mode: this.useMongo ? 'mongodb' : 'local-json' };
+      if (!this.useMongo || mongoose.connection.readyState === 1) {
+        return { mode: this.useMongo ? 'mongodb' : 'local-json' };
+      }
+      // Reset stale connection across frozen serverless invocations
+      this.initialized = false;
+      this.initPromise = null;
     }
 
+    if (this.initPromise) {
+      return this.initPromise;
+    }
+
+    this.initPromise = this.performInit().catch((err) => {
+      this.initPromise = null;
+      this.initialized = false;
+      throw err;
+    });
+
+    return this.initPromise;
+  }
+
+  private async performInit(): Promise<{ mode: 'mongodb' | 'local-json' }> {
     const rawUri = process.env.MONGODB_URI?.trim() || '';
     const mongoUri = rawUri.replace(/^["']|["']$/g, '').trim();
     const hasValidMongoScheme =
       mongoUri.startsWith('mongodb://') || mongoUri.startsWith('mongodb+srv://');
+    const strictMongo = this.isStrictMongoRequired();
 
     if (hasValidMongoScheme) {
       try {
-        await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 5000 });
+        if (mongoose.connection.readyState !== 1) {
+          await mongoose.connect(mongoUri, {
+            serverSelectionTimeoutMS: 8000,
+            maxPoolSize: 10,
+          });
+        }
         this.useMongo = true;
         await this.ensureMongoSeeded();
         this.initialized = true;
         console.log('[KinLedger DB] Connected to MongoDB Atlas');
         return { mode: 'mongodb' };
       } catch (err) {
+        const message = (err as Error).message || 'Unknown MongoDB connection error';
+        if (strictMongo) {
+          throw new Error(
+            `MongoDB Atlas connection failed: ${message}. Verify MONGODB_URI and ensure MongoDB Atlas Network Access allows 0.0.0.0/0.`
+          );
+        }
         console.log(
           '[KinLedger DB] MongoDB Atlas unreachable, using local persistent JSON store:',
-          (err as Error).message
+          message
         );
       }
+    } else if (strictMongo) {
+      throw new Error(
+        mongoUri.length > 0
+          ? 'Invalid MONGODB_URI scheme. Connection string must start with "mongodb://" or "mongodb+srv://".'
+          : 'MONGODB_URI environment variable is not configured. Add MONGODB_URI in Vercel Project Settings -> Environment Variables.'
+      );
     } else if (mongoUri.length > 0) {
       console.log(
         '[KinLedger DB] MONGODB_URI is not a MongoDB Atlas URI; using local persistent JSON store.'
@@ -89,17 +131,33 @@ class ErpStore {
     return this.useMongo ? 'mongodb' : 'local-json';
   }
 
+  isMongoConnected(): boolean {
+    return this.useMongo && mongoose.connection.readyState === 1;
+  }
+
   private async ensureMongoSeeded() {
     const existingFamilies = await FamilyModel.countDocuments();
     if (existingFamilies > 0) return;
 
     const seed = await createSeedDataset();
-    await FamilyModel.insertMany(seed.families.map((f) => ({ ...f, _id: f.id })));
-    await UserModel.insertMany(seed.users.map((u) => ({ ...u, _id: u.id })));
-    await TransactionModel.insertMany(seed.transactions.map((t) => ({ ...t, _id: t.id })));
-    await BudgetModel.insertMany(seed.budgets.map((b) => ({ ...b, _id: b.id })));
-    await SavingsGoalModel.insertMany(seed.goals.map((g) => ({ ...g, _id: g.id })));
-    await NotificationModel.insertMany(seed.notifications.map((n) => ({ ...n, _id: n.id })));
+    const insertSafe = async (model: typeof FamilyModel, docs: Record<string, unknown>[]) => {
+      try {
+        await model.insertMany(docs, { ordered: false });
+      } catch (err) {
+        const code = (err as { code?: number }).code;
+        // Ignore duplicate key errors when concurrent serverless cold starts race to seed
+        if (code !== 11000) {
+          throw err;
+        }
+      }
+    };
+
+    await insertSafe(FamilyModel, seed.families.map((f) => ({ ...f, _id: f.id })));
+    await insertSafe(UserModel, seed.users.map((u) => ({ ...u, _id: u.id })));
+    await insertSafe(TransactionModel, seed.transactions.map((t) => ({ ...t, _id: t.id })));
+    await insertSafe(BudgetModel, seed.budgets.map((b) => ({ ...b, _id: b.id })));
+    await insertSafe(SavingsGoalModel, seed.goals.map((g) => ({ ...g, _id: g.id })));
+    await insertSafe(NotificationModel, seed.notifications.map((n) => ({ ...n, _id: n.id })));
   }
 
   private async initLocalStore() {

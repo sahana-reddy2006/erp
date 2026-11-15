@@ -63,6 +63,7 @@ export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [family, setFamily] = useState<Family | null>(null);
   const [storageMode, setStorageMode] = useState<'mongodb' | 'local-json'>('local-json');
+  const [realtimeMode, setRealtimeMode] = useState<'websocket' | 'polling'>('websocket');
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -128,8 +129,15 @@ export default function App() {
 
     async function hydrate() {
       try {
-        const health = await api.health().catch(() => ({ ok: true, storage: 'local-json' as const }));
-        if (active) setStorageMode(health.storage);
+        const health = await api.health().catch(() => ({
+          ok: true,
+          storage: 'local-json' as const,
+          realtime: 'websocket' as const,
+        }));
+        if (active) {
+          setStorageMode(health.storage);
+          setRealtimeMode(health.realtime === 'polling' ? 'polling' : 'websocket');
+        }
 
         const token = getStoredToken();
         if (token) {
@@ -163,7 +171,7 @@ export default function App() {
     void refreshAnalyticsAndBudgets(selectedMonth);
   }, [selectedMonth, user, refreshAnalyticsAndBudgets]);
 
-  // Real-time WebSocket Connection
+  // Real-time Sync Connection (WebSocket on Node servers, HTTPS polling on Vercel Serverless)
   useEffect(() => {
     if (!user) {
       if (wsRef.current) {
@@ -172,6 +180,19 @@ export default function App() {
       }
       setWsConnected(false);
       return;
+    }
+
+    if (realtimeMode === 'polling') {
+      setWsConnected(true);
+      const syncNow = () => {
+        void loadWorkspaceData(selectedMonthRef.current).catch(() => {});
+      };
+      const pollId = window.setInterval(syncNow, 15000);
+      window.addEventListener('focus', syncNow);
+      return () => {
+        window.clearInterval(pollId);
+        window.removeEventListener('focus', syncNow);
+      };
     }
 
     let cancelled = false;
@@ -260,7 +281,7 @@ export default function App() {
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       if (wsRef.current) wsRef.current.close();
     };
-  }, [user, refreshAnalyticsAndBudgets]);
+  }, [user, realtimeMode, refreshAnalyticsAndBudgets, loadWorkspaceData]);
 
   const handleAuthenticated = async (auth: AuthResponse) => {
     setStoredToken(auth.token);
@@ -578,6 +599,7 @@ export default function App() {
               goals={goals}
               connectedDevices={connectedDevices}
               wsConnected={wsConnected}
+              realtimeMode={realtimeMode}
               onOpenNewTransaction={(t) => {
                 setEditingTx(null);
                 setDefaultTxType(t);
@@ -668,6 +690,7 @@ export default function App() {
               family={family}
               theme={theme}
               storageMode={storageMode}
+              realtimeMode={realtimeMode}
               connectedDevices={connectedDevices}
               onToggleTheme={toggleTheme}
               onUpdateProfile={handleUpdateProfile}

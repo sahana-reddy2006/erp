@@ -11,6 +11,7 @@ import type {
 } from '../types/erp';
 
 const TOKEN_KEY = 'kinledger_jwt_token';
+const API_BASE = ((import.meta as unknown as { env?: Record<string, string> }).env?.VITE_API_URL || '').replace(/\/+$/, '');
 
 export function getStoredToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -34,20 +35,39 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`${API_BASE}/api${path}`, {
     ...options,
     headers,
   });
 
-  const data = await res.json().catch(() => ({}));
+  const text = await res.text();
+  let data: Record<string, unknown> = {};
+  if (text) {
+    try {
+      data = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      data = {};
+    }
+  }
+
   if (!res.ok) {
-    throw new Error((data as { error?: string }).error || `Request failed (${res.status})`);
+    const message =
+      (typeof data.error === 'string' && data.error) ||
+      `Request failed (${res.status})`;
+    throw new Error(message);
   }
   return data as T;
 }
 
 export const api = {
-  health: () => request<{ ok: boolean; storage: 'mongodb' | 'local-json' }>('/health'),
+  health: () =>
+    request<{
+      ok: boolean;
+      storage: 'mongodb' | 'local-json';
+      mongoConnected?: boolean;
+      realtime?: 'websocket' | 'polling';
+      environment?: 'vercel' | 'node';
+    }>('/health'),
 
   demoAccounts: () =>
     request<{

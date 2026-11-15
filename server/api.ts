@@ -87,10 +87,30 @@ function normalizePlatform(raw: unknown): DevicePlatform {
 export function createApiRouter() {
   const router = express.Router();
 
+  // Ensure rejected promises in Express 4 async handlers are forwarded to error middleware
+  for (const method of ['get', 'post', 'patch', 'put', 'delete'] as const) {
+    const original = router[method].bind(router);
+    (router as unknown as Record<string, unknown>)[method] = (
+      routePath: string,
+      ...handlers: Array<(...args: unknown[]) => unknown>
+    ) => {
+      const wrapped = handlers.map((fn) =>
+        typeof fn === 'function' && fn.length < 4
+          ? (req: Request, res: Response, next: NextFunction) =>
+              Promise.resolve(fn(req, res, next)).catch(next)
+          : fn
+      );
+      return original(routePath, ...(wrapped as never[]));
+    };
+  }
+
   router.get('/health', (_req, res) => {
     res.json({
       ok: true,
       storage: erpStore.getStorageMode(),
+      mongoConnected: erpStore.isMongoConnected(),
+      realtime: process.env.VERCEL ? 'polling' : 'websocket',
+      environment: process.env.VERCEL ? 'vercel' : 'node',
       timestamp: new Date().toISOString(),
     });
   });
@@ -213,7 +233,7 @@ export function createApiRouter() {
       role,
       relationship: relationship?.trim() || (role === 'admin' ? 'Household Admin' : 'Family Member'),
       phone: phone?.trim() || '',
-      monthlyAllowance: 1500,
+      monthlyAllowance: 25000,
       themePreference: 'light',
       pushNotificationsEnabled: true,
       expoPushTokens: [],
@@ -302,12 +322,13 @@ export function createApiRouter() {
     res.json({ message: 'Password updated successfully. You can now sign in with your new password.' });
   });
 
-  // Protected routes below
-  router.use(authMiddleware);
-
+  // Allow logout even if the client's JWT token has already expired
   router.post('/auth/logout', (_req, res) => {
     res.json({ ok: true });
   });
+
+  // Protected routes below
+  router.use(authMiddleware);
 
   router.get('/auth/me', async (req: AuthRequest, res) => {
     const user = await erpStore.getUserById(req.auth!.userId);
@@ -817,7 +838,7 @@ export function createApiRouter() {
       role: assignedRole,
       relationship: relationship?.trim() || 'Family Member',
       phone: phone?.trim() || '',
-      monthlyAllowance: Number(monthlyAllowance || 1000),
+      monthlyAllowance: Number(monthlyAllowance ?? 15000),
       themePreference: 'light',
       pushNotificationsEnabled: true,
       expoPushTokens: [],
@@ -1011,6 +1032,14 @@ export function createApiRouter() {
 
   router.get('/devices/connected', (req: AuthRequest, res) => {
     res.json({ devices: realtimeHub.getConnectedDevices(req.auth!.familyId) });
+  });
+
+  router.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    console.error('[KinLedger API Error]', err);
+    if (res.headersSent) return;
+    res.status(500).json({
+      error: err instanceof Error ? err.message : 'Unexpected server error.',
+    });
   });
 
   return router;

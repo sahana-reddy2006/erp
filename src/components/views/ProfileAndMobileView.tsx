@@ -8,6 +8,7 @@ interface ProfileAndMobileViewProps {
   family: Family;
   theme: 'light' | 'dark';
   storageMode: 'mongodb' | 'local-json';
+  realtimeMode?: 'websocket' | 'polling';
   connectedDevices: ConnectedDevice[];
   onToggleTheme: () => void;
   onUpdateProfile: (payload: {
@@ -26,6 +27,7 @@ export function ProfileAndMobileView({
   family,
   theme,
   storageMode,
+  realtimeMode = 'websocket',
   connectedDevices,
   onToggleTheme,
   onUpdateProfile,
@@ -231,7 +233,8 @@ export function ProfileAndMobileView({
 
             <div className="text-xs text-slate-600 dark:text-slate-300 space-y-1.5 leading-relaxed">
               <p>
-                Android, iOS, and Web clients all authenticate against this unified Express + JWT API and synchronize instantaneously via WebSockets.
+                Android, iOS, and Web clients all authenticate against this unified Express + JWT API and synchronize via{' '}
+                {realtimeMode === 'polling' ? 'cloud HTTPS sync backed by MongoDB Atlas.' : 'WebSockets.'}
               </p>
               <p className="font-mono text-[11px] bg-slate-100 dark:bg-slate-950 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 overflow-x-auto">
                 Active connected clients: {connectedDevices.length} · Family Code: {family.familyCode}

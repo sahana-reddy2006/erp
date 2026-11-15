@@ -21,6 +21,7 @@ interface DashboardViewProps {
   goals: SavingsGoal[];
   connectedDevices: ConnectedDevice[];
   wsConnected: boolean;
+  realtimeMode?: 'websocket' | 'polling';
   onOpenNewTransaction: (type: TransactionType) => void;
   onEditTransaction: (tx: Transaction) => void;
   onNavigate: (tab: string) => void;
@@ -36,6 +37,7 @@ export function DashboardView({
   goals,
   connectedDevices,
   wsConnected,
+  realtimeMode = 'websocket',
   onOpenNewTransaction,
   onEditTransaction,
   onNavigate,
@@ -297,7 +299,11 @@ export function DashboardView({
                     wsConnected ? 'bg-emerald-600' : 'bg-amber-500'
                   }`}
                 />
-                {wsConnected ? 'Live WebSocket' : 'Reconnecting'}
+                {realtimeMode === 'polling'
+                  ? 'Cloud Sync'
+                  : wsConnected
+                    ? 'Live WebSocket'
+                    : 'Reconnecting'}
               </span>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
@@ -305,7 +311,11 @@ export function DashboardView({
             </p>
             <div className="divide-y divide-slate-100 dark:divide-slate-800">
               {connectedDevices.length === 0 ? (
-                <p className="text-xs text-slate-500 py-2">Connecting active session...</p>
+                <p className="text-xs text-slate-500 py-2">
+                  {realtimeMode === 'polling'
+                    ? 'Active HTTPS cloud synchronization via MongoDB Atlas.'
+                    : 'Connecting active session...'}
+                </p>
               ) : (
                 connectedDevices.slice(0, 5).map((dev) => (
                   <div key={dev.connectionId} className="py-2 flex items-center justify-between gap-3 text-xs">
